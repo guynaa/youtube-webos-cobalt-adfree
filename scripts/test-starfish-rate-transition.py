@@ -52,6 +52,7 @@ fixture = r'''
 #include <string>
 #include <vector>
 #include "starfish_av_session_state.h"
+#include "starfish_fps_hint.h"
 #include "starfish_rate_replay.h"
 #include "starfish_rate_transition.h"
 #include "starfish_video_configuration.h"
@@ -165,6 +166,9 @@ struct Owner {
   bool audio_origin_=false, error_sent_=false, window_prearmed_=false;
   int width_=1920, height_=1080, window_width_=0, window_height_=0;
   unsigned video_bits_=8;
+  std::vector<int64_t> fps_pts_;
+  double caps_fps_=0;
+  std::string video_caps_;
   SbMediaVideoCodec video_codec_=kSbMediaVideoCodecAv1;
   bool stopping_=false;
   uint64_t request_revision_=0;

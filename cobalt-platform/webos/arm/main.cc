@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -18,6 +19,7 @@
 #include "starboard/shared/starboard/link_receiver.h"
 #include "starboard/webos/arm/application_sdl.h"
 #include "starboard/webos/arm/launch_parameters.h"
+#include "starboard/webos/arm/starfish_fps_hint.h"
 
 namespace {
 
@@ -65,7 +67,15 @@ extern "C" SB_EXPORT_PLATFORM int main(int argc, char** argv) {
   // 8 MiB and continue appending.
   constexpr off_t kMaxLogBytes = 16 * 1024 * 1024;
   constexpr off_t kRetainedLogBytes = 8 * 1024 * 1024;
-  const char* log_path = "/tmp/cobalt-starterless.log";
+  // EXPERIMENT: webOS 11.2 gives Cobalt a private /tmp that developer-mode
+  // shells cannot read, so log beside the executable instead.
+  static const std::string log_path_storage = [] {
+    const std::string dir =
+        ::starboard::shared::webos::ExecutableDirectory();
+    return dir.empty() ? std::string("/tmp/cobalt-starterless.log")
+                       : dir + "/cobalt-starterless.log";
+  }();
+  const char* log_path = log_path_storage.c_str();
 
   auto trim_log = [log_path, kMaxLogBytes, kRetainedLogBytes](off_t size) {
     if (size < kMaxLogBytes) return;

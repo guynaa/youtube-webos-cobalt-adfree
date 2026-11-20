@@ -24,6 +24,7 @@
 #include "starboard/webos/arm/shared_av_experiment.h"
 #include "starboard/webos/arm/starfish_audio_timing.h"
 #include "starboard/webos/arm/starfish_av_session_state.h"
+#include "starboard/webos/arm/starfish_fps_hint.h"
 #include "starboard/webos/arm/starfish_video_configuration.h"
 #include "starboard/webos/arm/starfish_rate_replay.h"
 #include "starboard/webos/arm/starfish_rate_transition.h"
@@ -471,6 +472,13 @@ class Owner : public player::JobQueue::JobOwner {
         if (!first_video_ && packets.empty() && !info.is_key_frame) {
           FailLocked("shared A/V restart needs a video keyframe"); return;
         }
+        // EXPERIMENT (starfish_fps_hint.h): learn the stream's frame rate.
+        if (fps_pts_.size() < 32) fps_pts_.push_back(pts);
+        if (video_caps_.empty() && info.max_video_capabilities &&
+            info.max_video_capabilities[0] != '\0') {
+          video_caps_ = info.max_video_capabilities;
+          caps_fps_ = FrameRateFromCapabilities(info.max_video_capabilities);
+        }
       }
       packets.push_back({buffer, static_cast<size_t>(buffer->size()), pts,
                          stream == Stream::kVideo &&
@@ -799,6 +807,9 @@ class Owner : public player::JobQueue::JobOwner {
     unsigned bits;
     bool hdr, snapped, prearmed, restart, origin;
     std::deque<NativeSession::Replay::Entry> restart_audio, restart_video;
+    std::vector<int64_t> fps_pts;
+    double caps_fps = 0;
+    std::string video_caps;
     {
       Guard guard(mutex_);
       if (!first_audio_ || !first_video_ || !error_.empty() ||
@@ -830,6 +841,7 @@ class Owner : public player::JobQueue::JobOwner {
         first_audio = first_audio_pts_; first_video = first_video_pts_;
       }
       width = width_; height = height_; bits = video_bits_; hdr = video_hdr_;
+      fps_pts = fps_pts_; caps_fps = caps_fps_; video_caps = video_caps_;
       if (!restart) {
         const bool planned = audio_.is_opus
             ? PlanStarfishOpusSession(audio_.opus, first_audio, first_video,
@@ -929,28 +941,40 @@ class Owner : public player::JobQueue::JobOwner {
           plan.aac.channels, plan.aac.sample_rate, plan.aac.profile,
           Base64(plan.aac.asc.data(), plan.aac.asc.size()).c_str());
     }
+    // EXPERIMENT (starfish_fps_hint.h): frame-rate hints in the Load payload.
+    const FpsHintVariant fps_variant = ConfiguredFpsHintVariant();
+    const double pts_fps = FrameRateFromTimestamps(fps_pts);
+    const double stream_fps = pts_fps > 0 ? pts_fps : caps_fps;
+    const std::string es_info = BuildEsInfo(
+        fps_variant, stream_fps,
+        static_cast<long long>(plan.target_native_us * 1000), width, height);
+    const int max_frame_rate =
+        MaxFrameRateHint(fps_variant, std::max(stream_fps, caps_fps));
     const std::string payload = FormatString(
         "{\"args\":[{\"mediaTransportType\":\"BUFFERSTREAM\",\"option\":{"
         "\"appId\":\"youtube.leanback.v4\",%s\"queryPosition\":false,"
         "\"externalStreamingInfo\":{\"contents\":{\"format\":\"RAW\",\"provider\":\"Chrome\","
         "\"codec\":{\"video\":\"%s\",\"audio\":\"%s\"},"
-        "\"esInfo\":{\"pauseAtDecodeTime\":false,\"seperatedPTS\":true,\"ptsToDecode\":%lld,"
-        "\"videoWidth\":%d,\"videoHeight\":%d,\"videoFpsValue\":60,\"videoFpsScale\":1},"
+        "\"esInfo\":%s,"
         "%s"
         "\"restartStreaming\":false,\"totalStreamSize\":256,\"bufferingCtrInfo\":{"
         "\"srcBufferLevelAudio\":{\"minimum\":1024,\"maximum\":1048576},"
         "\"srcBufferLevelVideo\":{\"minimum\":1024,\"maximum\":8388608}}},"
         "\"adaptiveStreaming\":{\"audioOnly\":false,\"adaptiveResolution\":true,"
-        "\"maxWidth\":%d,\"maxHeight\":%d,\"maxFrameRate\":60},"
+        "\"maxWidth\":%d,\"maxHeight\":%d,\"maxFrameRate\":%d},"
         // Client-side trick play: SetPlayRate changes speed in place instead of
         // flushing compressed input, matching the stock pipeline configuration.
         "\"forcedPrerollOnPause\":true,\"seekMode\":\"keep-rate\","
         "\"transmission\":{\"trickType\":\"client-side\"}}}]}",
         window_field.c_str(), codec_name,
         audio_.is_opus ? "OPUS" : "AAC",
-        static_cast<long long>(plan.target_native_us * 1000), width, height,
+        es_info.c_str(),
         audio_codec_field.c_str(),
-        max_width, max_height);
+        max_width, max_height, max_frame_rate);
+    Trace("fps-hint generation=%llu variant=%d stream_fps=%.3f pts_fps=%.3f pts_samples=%zu caps_fps=%.3f maxFrameRate=%d esInfo=%s caps=\"%.200s\"",
+          static_cast<unsigned long long>(generation), static_cast<int>(fps_variant),
+          stream_fps, pts_fps, fps_pts.size(), caps_fps, max_frame_rate,
+          es_info.c_str(), video_caps.c_str());
     Trace("load generation=%llu codec=%s size=%dx%d bits=%u hdr=%d target_us=%lld audio_us=%lld video_us=%lld epoch_us=%lld discard_samples=%u",
           static_cast<unsigned long long>(generation), codec_name, width, height, bits, hdr,
           static_cast<long long>(target),
@@ -1517,6 +1541,10 @@ class Owner : public player::JobQueue::JobOwner {
   // Resolution the retained exported window is currently configured with.
   int window_width_ = 0, window_height_ = 0;
   unsigned video_bits_ = 0;
+  // EXPERIMENT (starfish_fps_hint.h): first video timestamps and capabilities.
+  std::vector<int64_t> fps_pts_;
+  double caps_fps_ = 0;
+  std::string video_caps_;
   double rate_ = 1, applied_rate_ = 1, volume_ = 1;
   std::string error_;
   std::string hdr_payload_;
