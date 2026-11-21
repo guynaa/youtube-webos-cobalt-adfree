@@ -40,6 +40,10 @@ enum class FpsHintVariant {
   kOmitFpsRealMax = 2,  // no esInfo frame rate, maxFrameRate real
   kOmitFps = 3,         // no esInfo frame rate, maxFrameRate 60
   kStockEsInfo = 4,     // esInfo only seperatedPTS + ptsToDecode, maxFrameRate real
+  // Round 2: can the sink present every frame at 2x (60 fps -> 120 Hz)?
+  kOmitFps120 = 5,      // no esInfo frame rate, maxFrameRate 120
+  kRealFps120 = 6,      // esInfo real value/scale, maxFrameRate 120
+  kDoubleFps = 7,       // esInfo and maxFrameRate twice the real rate
 };
 
 inline FpsHintVariant ParseFpsHintVariant(int c) {
@@ -48,6 +52,9 @@ inline FpsHintVariant ParseFpsHintVariant(int c) {
     case '2': return FpsHintVariant::kOmitFpsRealMax;
     case '3': return FpsHintVariant::kOmitFps;
     case '4': return FpsHintVariant::kStockEsInfo;
+    case '5': return FpsHintVariant::kOmitFps120;
+    case '6': return FpsHintVariant::kRealFps120;
+    case '7': return FpsHintVariant::kDoubleFps;
     default: return FpsHintVariant::kCurrent;
   }
 }
@@ -130,6 +137,14 @@ inline FpsRatio ToFpsRatio(double fps) {
 }
 
 inline int MaxFrameRateHint(FpsHintVariant variant, double fps) {
+  if (variant == FpsHintVariant::kOmitFps120 ||
+      variant == FpsHintVariant::kRealFps120) {
+    return 120;
+  }
+  if (variant == FpsHintVariant::kDoubleFps) {
+    return PlausibleFrameRate(fps) ? static_cast<int>(std::ceil(2 * fps - 0.01))
+                                   : 120;
+  }
   if (variant == FpsHintVariant::kCurrent ||
       variant == FpsHintVariant::kOmitFps || !PlausibleFrameRate(fps)) {
     return 60;
@@ -158,8 +173,12 @@ inline std::string BuildEsInfo(FpsHintVariant variant,
   std::string es_info(out, written > 0 ? static_cast<size_t>(written) : 0);
   if (variant == FpsHintVariant::kCurrent) {
     es_info += ",\"videoFpsValue\":60,\"videoFpsScale\":1";
-  } else if (variant == FpsHintVariant::kRealFps) {
-    const FpsRatio ratio = ToFpsRatio(fps);
+  } else if (variant == FpsHintVariant::kRealFps ||
+             variant == FpsHintVariant::kRealFps120 ||
+             variant == FpsHintVariant::kDoubleFps) {
+    const double declared =
+        variant == FpsHintVariant::kDoubleFps && PlausibleFrameRate(fps) ? 2 * fps : fps;
+    const FpsRatio ratio = ToFpsRatio(declared);
     std::snprintf(out, sizeof(out), ",\"videoFpsValue\":%d,\"videoFpsScale\":%d",
                   ratio.value, ratio.scale);
     es_info += out;

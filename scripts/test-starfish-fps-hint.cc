@@ -29,6 +29,10 @@ int main() {
   CHECK(ParseFpsHintVariant('2') == FpsHintVariant::kOmitFpsRealMax);
   CHECK(ParseFpsHintVariant('3') == FpsHintVariant::kOmitFps);
   CHECK(ParseFpsHintVariant('4') == FpsHintVariant::kStockEsInfo);
+  CHECK(ParseFpsHintVariant('5') == FpsHintVariant::kOmitFps120);
+  CHECK(ParseFpsHintVariant('6') == FpsHintVariant::kRealFps120);
+  CHECK(ParseFpsHintVariant('7') == FpsHintVariant::kDoubleFps);
+  CHECK(ParseFpsHintVariant('8') == FpsHintVariant::kCurrent);
   CHECK(ParseFpsHintVariant('x') == FpsHintVariant::kCurrent);
   CHECK(ParseFpsHintVariant(EOF) == FpsHintVariant::kCurrent);
 
@@ -78,6 +82,11 @@ int main() {
   CHECK(MaxFrameRateHint(FpsHintVariant::kOmitFpsRealMax, 29.97) == 30);
   CHECK(MaxFrameRateHint(FpsHintVariant::kStockEsInfo, 59.94) == 60);
   CHECK(MaxFrameRateHint(FpsHintVariant::kRealFps, 0) == 60);
+  CHECK(MaxFrameRateHint(FpsHintVariant::kOmitFps120, 30) == 120);
+  CHECK(MaxFrameRateHint(FpsHintVariant::kRealFps120, 0) == 120);
+  CHECK(MaxFrameRateHint(FpsHintVariant::kDoubleFps, 59.94) == 120);
+  CHECK(MaxFrameRateHint(FpsHintVariant::kDoubleFps, 30) == 60);
+  CHECK(MaxFrameRateHint(FpsHintVariant::kDoubleFps, 0) == 120);
 
   // esInfo objects. Variant 0 must equal the v2.0.1 payload byte for byte.
   CHECK(BuildEsInfo(FpsHintVariant::kCurrent, 25, 1000, 1920, 1080) ==
@@ -96,6 +105,17 @@ int main() {
   CHECK(BuildEsInfo(FpsHintVariant::kStockEsInfo, 25, 9223372036854775807LL,
                     3840, 2160) ==
         "{\"seperatedPTS\":true,\"ptsToDecode\":9223372036854775807}");
+
+  CHECK(BuildEsInfo(FpsHintVariant::kOmitFps120, 59.94, 0, 3840, 2160) ==
+        BuildEsInfo(FpsHintVariant::kOmitFps, 59.94, 0, 3840, 2160));
+  CHECK(BuildEsInfo(FpsHintVariant::kRealFps120, 59.94, 0, 3840, 2160) ==
+        BuildEsInfo(FpsHintVariant::kRealFps, 59.94, 0, 3840, 2160));
+  CHECK(BuildEsInfo(FpsHintVariant::kDoubleFps, 59.94, 0, 3840, 2160) ==
+        "{\"pauseAtDecodeTime\":false,\"seperatedPTS\":true,\"ptsToDecode\":0,"
+        "\"videoWidth\":3840,\"videoHeight\":2160,\"videoFpsValue\":120000,"
+        "\"videoFpsScale\":1001}");
+  CHECK(BuildEsInfo(FpsHintVariant::kDoubleFps, 25, 0, 1920, 1080).find(
+            "\"videoFpsValue\":50,\"videoFpsScale\":1}") != std::string::npos);
 
   if (failures) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
